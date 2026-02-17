@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pixel Canvas — Draw Your Mark</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="header">
+    <h1>Pixel Canvas</h1>
+    <p class="tagline">Draw up to 5 connecting pixels per day. Your session, your colors.</p>
+    <div class="stats">
+      <span id="remaining">5</span> pixels left today
+      <span class="divider">•</span>
+      <span id="my-count">0</span> your pixels
+    </div>
+  </header>
+
+  <main class="main">
+    <aside class="sidebar">
+      <div class="color-section">
+        <label for="color-picker">Pick a color</label>
+        <input type="color" id="color-picker" value="#ff6b6b">
+        <input type="text" id="color-hex" value="#ff6b6b" maxlength="7">
+      </div>
+      <div class="visitor-log">
+        <label>Recent visitors</label>
+        <div id="visitor-log-list" class="visitor-log-list"></div>
+      </div>
+      <div class="hint">
+        Click empty cells adjacent to your pixels to draw. Change colors anytime during your session.
+      </div>
+      <button type="button" id="lock-btn" class="lock-btn">End Session & Lock Pixels</button>
+    </aside>
+
+    <div class="grid-container">
+      <canvas id="grid" width="200" height="200"></canvas>
+      <div id="magnifier" class="magnifier">
+        <canvas id="magnifier-canvas"></canvas>
+        <div class="magnifier-crosshair"></div>
+      </div>
+      <div id="cursor-preview"></div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
