@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 
 // Session config - 30 min inactivity = session ends, pixels lock
 const SESSION_DURATION_MS = 30 * 60 * 1000;
-const MAX_PIXELS_PER_DAY = 5;
+const MAX_PIXELS_PER_DAY = 10;
 const GRID_SIZE = 200;
 
 // Database setup
@@ -56,9 +56,16 @@ function getClientIP(req) {
   return req.ip || req.connection.remoteAddress || 'unknown';
 }
 
+function isLocalhost(ip) {
+  if (!ip) return false;
+  return ip === '::1' || ip === '127.0.0.1' || ip.startsWith('::ffff:127.');
+}
+
 // Recent visitors log (in-memory, max 50)
 const recentVisitors = [];
+const seenVisitorSessions = new Set();  // "ip|sessionId" - one entry per session
 const MAX_VISITORS = 50;
+const MAX_SEEN_SESSIONS = 500;  // prevent unbounded growth
 
 function getGeoLocation(ip) {
   if (!ip || ip === 'unknown') return { city: 'Unknown', country: 'Unknown' };
@@ -74,9 +81,11 @@ function getGeoLocation(ip) {
   };
 }
 
-function logVisitor(ip) {
-  const last = recentVisitors[0];
-  if (last && last.ip === ip && Date.now() - last.timestamp < 10000) return;
+function logVisitor(ip, sessionId) {
+  const key = `${ip}|${sessionId || 'anon'}`;
+  if (seenVisitorSessions.has(key)) return;
+  seenVisitorSessions.add(key);
+  if (seenVisitorSessions.size > MAX_SEEN_SESSIONS) seenVisitorSessions.clear();
   const loc = getGeoLocation(ip);
   recentVisitors.unshift({
     ip,
@@ -121,7 +130,7 @@ app.get('/api/recent-visitors', (req, res) => {
 
 // API: Get full grid state
 app.get('/api/grid', (req, res) => {
-  logVisitor(getClientIP(req));
+  logVisitor(getClientIP(req), req.session?.pixelSessionId);
   const pixels = db.prepare(`
     SELECT x, y, color, locked FROM pixels
   `).all();
@@ -150,14 +159,17 @@ app.get('/api/me', (req, res) => {
   `).get(ip, today);
 
   const drawnToday = dailyRow ? dailyRow.count : 0;
-  const remaining = Math.max(0, MAX_PIXELS_PER_DAY - drawnToday);
+  const remaining = isLocalhost(ip)
+    ? 999
+    : Math.max(0, MAX_PIXELS_PER_DAY - drawnToday);
+  const maxPerDay = isLocalhost(ip) ? 999 : MAX_PIXELS_PER_DAY;
 
   res.json({
     sessionId,
     myPixels,
     drawnToday,
     remaining,
-    maxPerDay: MAX_PIXELS_PER_DAY
+    maxPerDay
   });
 });
 
@@ -192,9 +204,11 @@ app.post('/api/pixel', (req, res) => {
     SELECT * FROM pixels WHERE x = ? AND y = ?
   `).get(x, y);
 
-  const myPixels = db.prepare(`
+  const mySessionPixels = db.prepare(`
     SELECT x, y, locked FROM pixels WHERE session_id = ? AND ip = ?
   `).all(sessionId, ip);
+
+  const allPixels = db.prepare(`SELECT x, y FROM pixels`).all();
 
   const today = new Date().toISOString().slice(0, 10);
   const dailyRow = db.prepare(`
@@ -218,17 +232,18 @@ app.post('/api/pixel', (req, res) => {
     return res.status(409).json({ error: 'Pixel already taken' });
   }
 
-  if (drawnToday >= MAX_PIXELS_PER_DAY) {
-    return res.status(429).json({ error: 'Daily limit reached (5 pixels per day)' });
+  if (!isLocalhost(ip)) {
+    if (drawnToday >= MAX_PIXELS_PER_DAY) {
+      return res.status(429).json({ error: `Daily limit reached (${MAX_PIXELS_PER_DAY} pixels per day)` });
+    }
+    if (mySessionPixels.length >= MAX_PIXELS_PER_DAY) {
+      return res.status(400).json({ error: `You already have ${MAX_PIXELS_PER_DAY} pixels this session` });
+    }
   }
 
-  if (myPixels.length >= MAX_PIXELS_PER_DAY) {
-    return res.status(400).json({ error: 'You already have 5 pixels this session' });
-  }
-
-  if (!isAdjacent(x, y, myPixels)) {
+  if (!isAdjacent(x, y, allPixels)) {
     return res.status(400).json({
-      error: 'Pixel must be adjacent to your existing pixels (including diagonally)'
+      error: 'Pixel must be adjacent to any existing pixel (including diagonally)'
     });
   }
 
@@ -237,10 +252,12 @@ app.post('/api/pixel', (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, 0)
   `).run(x, y, hexColor, sessionId, ip, Date.now());
 
-  db.prepare(`
-    INSERT INTO daily_draws (ip, date, count) VALUES (?, ?, 1)
-    ON CONFLICT(ip, date) DO UPDATE SET count = count + 1
-  `).run(ip, today);
+  if (!isLocalhost(ip)) {
+    db.prepare(`
+      INSERT INTO daily_draws (ip, date, count) VALUES (?, ?, 1)
+      ON CONFLICT(ip, date) DO UPDATE SET count = count + 1
+    `).run(ip, today);
+  }
 
   res.json({ success: true, action: 'placed' });
 });
@@ -296,15 +313,17 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Cron: lock inactive sessions every minute
+// Cron: lock inactive sessions every minute (skip localhost for dev)
 setInterval(() => {
   const cutoff = Date.now() - SESSION_DURATION_MS;
-  db.prepare(`
-    UPDATE pixels SET locked = 1
-    WHERE locked = 0 AND session_id IN (
-      SELECT session_id FROM sessions WHERE last_activity < ?
-    )
-  `).run(cutoff);
+  const staleSessions = db.prepare(`
+    SELECT session_id FROM sessions
+    WHERE last_activity < ? AND ip NOT IN ('::1', '127.0.0.1')
+    AND ip NOT LIKE '::ffff:127.%'
+  `).all(cutoff);
+  for (const row of staleSessions) {
+    db.prepare(`UPDATE pixels SET locked = 1 WHERE locked = 0 AND session_id = ?`).run(row.session_id);
+  }
 }, 60 * 1000);
 
 // Serve main page

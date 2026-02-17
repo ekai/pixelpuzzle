@@ -6,6 +6,7 @@ const colorHex = document.getElementById('color-hex');
 const lockBtn = document.getElementById('lock-btn');
 const remainingEl = document.getElementById('remaining');
 const myCountEl = document.getElementById('my-count');
+const emptyCountEl = document.getElementById('empty-count');
 const toastEl = document.getElementById('toast');
 const cursorPreview = document.getElementById('cursor-preview');
 const magnifier = document.getElementById('magnifier');
@@ -21,7 +22,8 @@ magnifierCanvas.height = MAGNIFIER_VIEW * MAGNIFIER_SCALE;
 
 let gridData = {};
 let myPixels = [];
-let remaining = 5;
+let remaining = 10;
+let maxPerDay = 10;
 let selectedColor = '#ff6b6b';
 let lastMouseEvent = null;
 
@@ -51,6 +53,12 @@ colorHex.addEventListener('blur', () => {
   }
 });
 
+function updateEmptyCount() {
+  const total = GRID_SIZE * GRID_SIZE;
+  const filled = Object.keys(gridData).length;
+  emptyCountEl.textContent = (total - filled).toLocaleString();
+}
+
 // Toast helper
 function toast(message, type = '') {
   toastEl.textContent = message;
@@ -69,10 +77,12 @@ async function fetchGrid() {
 
   gridData = grid;
   myPixels = me.myPixels || [];
-  remaining = me.remaining ?? 5;
+  remaining = me.remaining ?? 10;
+  maxPerDay = me.maxPerDay ?? 10;
 
   remainingEl.textContent = remaining;
   myCountEl.textContent = myPixels.length;
+  updateEmptyCount();
 
   render();
 }
@@ -148,6 +158,7 @@ async function placePixel(x, y) {
     }
 
     myCountEl.textContent = myPixels.length;
+    if (data.action === 'placed') updateEmptyCount();
     render();
     toast(data.action === 'placed' ? 'Pixel placed!' : 'Color updated', 'success');
   } catch (err) {
@@ -181,24 +192,26 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (remaining <= 0) {
-    toast('Daily limit reached (5 pixels)', 'error');
+    toast(`Daily limit reached (${maxPerDay} pixels)`, 'error');
     return;
   }
 
-  if (myPixels.length >= 5) {
-    toast('You already have 5 pixels', 'error');
+  if (myPixels.length >= maxPerDay) {
+    toast(`You already have ${maxPerDay} pixels`, 'error');
     return;
   }
 
-  // Check adjacency (including diagonal)
-  const adjacent = myPixels.some(p => {
-    const dx = Math.abs(p.x - x);
-    const dy = Math.abs(p.y - y);
+  // Check adjacency (including diagonal) - must be next to any existing pixel (or anywhere if grid is empty)
+  const existingCount = Object.keys(gridData).length;
+  const adjacent = existingCount === 0 || Object.keys(gridData).some(key => {
+    const [px, py] = key.split(',').map(Number);
+    const dx = Math.abs(px - x);
+    const dy = Math.abs(py - y);
     return dx <= 1 && dy <= 1 && (dx !== 0 || dy !== 0);
   });
 
-  if (!adjacent && myPixels.length > 0) {
-    toast('Pixel must be next to your existing pixels', 'error');
+  if (!adjacent) {
+    toast('Pixel must be next to any existing pixel', 'error');
     return;
   }
 

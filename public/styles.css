@@ -230,9 +230,6 @@ body::before {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 1rem;
   overflow: auto;
 }
@@ -243,7 +240,6 @@ body::before {
   image-rendering: crisp-edges;
   cursor: crosshair;
   border-radius: 4px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }
 
 .magnifier {
