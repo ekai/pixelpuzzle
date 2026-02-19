@@ -1,4 +1,5 @@
 node_modules/
 pixels.db
+sessions.db
 .env
 .DS_Store

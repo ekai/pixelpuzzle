@@ -1,6 +1,7 @@
 const express = require('express');
 const session = require('express-session');
 const Database = require('better-sqlite3');
+const SqliteStore = require('better-sqlite3-session-store')(session);
 const geoip = require('geoip-lite');
 const path = require('path');
 
@@ -18,6 +19,12 @@ const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH
   : path.join(__dirname, 'pixels.db');
 console.log('Database path:', dbPath, process.env.RAILWAY_VOLUME_MOUNT_PATH ? '(volume)' : '(local)');
 const db = new Database(dbPath);
+
+// Session store (persists to SQLite, avoids MemoryStore warning in production)
+const sessionDbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sessions.db')
+  : path.join(__dirname, 'sessions.db');
+const sessionDb = new Database(sessionDbPath);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS pixels (
@@ -102,7 +109,11 @@ function logVisitor(ip, sessionId) {
 }
 
 app.use(session({
-  secret: 'pixel-canvas-secret-' + Math.random().toString(36),
+  store: new SqliteStore({
+    client: sessionDb,
+    expired: { clear: true, intervalMs: 15 * 60 * 1000 }
+  }),
+  secret: process.env.SESSION_SECRET || 'pixel-canvas-secret-' + Math.random().toString(36),
   resave: false,
   saveUninitialized: true,
   cookie: {
