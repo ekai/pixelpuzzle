@@ -135,7 +135,7 @@ async function deletePixel(x, y) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ x, y, action: 'delete' })
+      body: JSON.stringify({ x: Number(x), y: Number(y), action: 'delete' })
     });
 
     const data = await res.json().catch(() => ({}));

@@ -192,19 +192,21 @@ function isAdjacent(x, y, pixels) {
 app.post('/api/pixel', (req, res) => {
   const ip = getClientIP(req);
   const sessionId = req.session.pixelSessionId;
-  const { x, y, color, action } = req.body;
+  const { x, y, color, action } = req.body || {};
+  const px = typeof x === 'number' ? x : parseInt(x, 10);
+  const py = typeof y === 'number' ? y : parseInt(y, 10);
 
-  if (typeof x !== 'number' || typeof y !== 'number') {
+  if (isNaN(px) || isNaN(py)) {
     return res.status(400).json({ error: 'Invalid x or y' });
   }
 
-  if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+  if (px < 0 || px >= GRID_SIZE || py < 0 || py >= GRID_SIZE) {
     return res.status(400).json({ error: 'Pixel out of bounds' });
   }
 
-  // Handle delete
+  // Delete: no color needed
   if (action === 'delete') {
-    const existing = db.prepare(`SELECT * FROM pixels WHERE x = ? AND y = ?`).get(x, y);
+    const existing = db.prepare(`SELECT * FROM pixels WHERE x = ? AND y = ?`).get(px, py);
     if (!existing) {
       return res.status(404).json({ error: 'No pixel at this location' });
     }
@@ -214,7 +216,7 @@ app.post('/api/pixel', (req, res) => {
     if (existing.locked) {
       return res.status(403).json({ error: 'Pixel is locked' });
     }
-    db.prepare(`DELETE FROM pixels WHERE x = ? AND y = ?`).run(x, y);
+    db.prepare(`DELETE FROM pixels WHERE x = ? AND y = ?`).run(px, py);
     if (!isLocalhost(ip)) {
       const today = new Date().toISOString().slice(0, 10);
       db.prepare(`
@@ -234,7 +236,7 @@ app.post('/api/pixel', (req, res) => {
 
   const existing = db.prepare(`
     SELECT * FROM pixels WHERE x = ? AND y = ?
-  `).get(x, y);
+  `).get(px, py);
 
   const mySessionPixels = db.prepare(`
     SELECT x, y, locked FROM pixels WHERE session_id = ? AND ip = ?
@@ -267,7 +269,7 @@ app.post('/api/pixel', (req, res) => {
     }
   }
 
-  if (!isAdjacent(x, y, allPixels)) {
+  if (!isAdjacent(px, py, allPixels)) {
     return res.status(400).json({
       error: 'Pixel must be adjacent to any existing pixel (including diagonally)'
     });
@@ -276,7 +278,7 @@ app.post('/api/pixel', (req, res) => {
   db.prepare(`
     INSERT INTO pixels (x, y, color, session_id, ip, created_at, locked)
     VALUES (?, ?, ?, ?, ?, ?, 0)
-  `).run(x, y, hexColor, sessionId, ip, Date.now());
+  `).run(px, py, hexColor, sessionId, ip, Date.now());
 
   if (!isLocalhost(ip)) {
     db.prepare(`
