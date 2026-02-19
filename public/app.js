@@ -128,6 +128,36 @@ function inBounds(x, y) {
   return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE;
 }
 
+// Delete own pixel (frees slot to place elsewhere)
+async function deletePixel(x, y) {
+  try {
+    const res = await fetch('/api/pixel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ x, y, action: 'delete' })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      toast(data.error || `Failed to delete pixel (${res.status})`, 'error');
+      return;
+    }
+
+    delete gridData[`${x},${y}`];
+    myPixels = myPixels.filter(p => p.x !== x || p.y !== y);
+    remaining++;
+    remainingEl.textContent = remaining;
+    myCountEl.textContent = myPixels.length;
+    updateEmptyCount();
+    render();
+    toast('Pixel removed. You can place another.', 'success');
+  } catch (err) {
+    toast('Network error', 'error');
+  }
+}
+
 // Place or update pixel
 async function placePixel(x, y) {
   try {
@@ -192,7 +222,7 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (myPixel) {
-    placePixel(x, y);
+    deletePixel(x, y);
     return;
   }
 

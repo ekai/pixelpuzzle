@@ -16,6 +16,7 @@ const GRID_SIZE = 200;
 const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'pixels.db')
   : path.join(__dirname, 'pixels.db');
+console.log('Database path:', dbPath, process.env.RAILWAY_VOLUME_MOUNT_PATH ? '(volume)' : '(local)');
 const db = new Database(dbPath);
 
 db.exec(`
@@ -191,14 +192,42 @@ function isAdjacent(x, y, pixels) {
 app.post('/api/pixel', (req, res) => {
   const ip = getClientIP(req);
   const sessionId = req.session.pixelSessionId;
-  const { x, y, color } = req.body;
+  const { x, y, color, action } = req.body;
 
-  if (typeof x !== 'number' || typeof y !== 'number' || !color) {
-    return res.status(400).json({ error: 'Invalid x, y, or color' });
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return res.status(400).json({ error: 'Invalid x or y' });
   }
 
   if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
     return res.status(400).json({ error: 'Pixel out of bounds' });
+  }
+
+  // Handle delete
+  if (action === 'delete') {
+    const existing = db.prepare(`SELECT * FROM pixels WHERE x = ? AND y = ?`).get(x, y);
+    if (!existing) {
+      return res.status(404).json({ error: 'No pixel at this location' });
+    }
+    if (existing.session_id !== sessionId || existing.ip !== ip) {
+      return res.status(403).json({ error: 'You can only delete your own pixels' });
+    }
+    if (existing.locked) {
+      return res.status(403).json({ error: 'Pixel is locked' });
+    }
+    db.prepare(`DELETE FROM pixels WHERE x = ? AND y = ?`).run(x, y);
+    if (!isLocalhost(ip)) {
+      const today = new Date().toISOString().slice(0, 10);
+      db.prepare(`
+        UPDATE daily_draws SET count = max(0, count - 1)
+        WHERE ip = ? AND date = ?
+      `).run(ip, today);
+    }
+    return res.json({ success: true, action: 'deleted' });
+  }
+
+  // Handle place
+  if (!color) {
+    return res.status(400).json({ error: 'Invalid color' });
   }
 
   const hexColor = /^#[0-9A-Fa-f]{6}$/.test(color) ? color : '#000000';
@@ -219,15 +248,9 @@ app.post('/api/pixel', (req, res) => {
   `).get(ip, today);
   const drawnToday = dailyRow ? dailyRow.count : 0;
 
-  // Case 1: Updating our own pixel (same session, not locked)
+  // Case 1: Our own pixel - must use DELETE to remove
   if (existing && existing.session_id === sessionId && existing.ip === ip) {
-    if (existing.locked) {
-      return res.status(403).json({ error: 'Pixel is locked' });
-    }
-    db.prepare(`
-      UPDATE pixels SET color = ? WHERE x = ? AND y = ?
-    `).run(hexColor, x, y);
-    return res.json({ success: true, action: 'updated' });
+    return res.status(400).json({ error: 'Use click to delete your pixel' });
   }
 
   // Case 2: Placing new pixel
