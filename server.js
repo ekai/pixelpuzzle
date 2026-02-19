@@ -12,8 +12,11 @@ const SESSION_DURATION_MS = 30 * 60 * 1000;
 const MAX_PIXELS_PER_DAY = 10;
 const GRID_SIZE = 200;
 
-// Database setup
-const db = new Database('pixels.db');
+// Database setup - use Railway volume for persistence when deployed
+const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'pixels.db')
+  : path.join(__dirname, 'pixels.db');
+const db = new Database(dbPath);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS pixels (
@@ -257,6 +260,12 @@ app.post('/api/pixel', (req, res) => {
       INSERT INTO daily_draws (ip, date, count) VALUES (?, ?, 1)
       ON CONFLICT(ip, date) DO UPDATE SET count = count + 1
     `).run(ip, today);
+    // Lock pixels when user reaches their daily limit (session complete)
+    const sessionComplete = mySessionPixels.length + 1 >= MAX_PIXELS_PER_DAY;
+    if (sessionComplete) {
+      db.prepare(`UPDATE pixels SET locked = 1 WHERE session_id = ? AND ip = ?`).run(sessionId, ip);
+    }
+    return res.json({ success: true, action: 'placed', sessionLocked: sessionComplete });
   }
 
   res.json({ success: true, action: 'placed' });

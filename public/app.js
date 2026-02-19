@@ -149,7 +149,9 @@ async function placePixel(x, y) {
     gridData[`${x},${y}`] = { color: selectedColor, locked: false };
 
     if (data.action === 'placed') {
-      myPixels.push({ x, y, color: selectedColor, locked: false });
+      const locked = !!data.sessionLocked;
+      myPixels.push({ x, y, color: selectedColor, locked });
+      if (locked) myPixels.forEach(p => { p.locked = true; });
       remaining--;
       remainingEl.textContent = remaining;
     } else {
@@ -160,7 +162,10 @@ async function placePixel(x, y) {
     myCountEl.textContent = myPixels.length;
     if (data.action === 'placed') updateEmptyCount();
     render();
-    toast(data.action === 'placed' ? 'Pixel placed!' : 'Color updated', 'success');
+    toast(
+      data.sessionLocked ? 'Session complete! Your pixels are now locked.' : (data.action === 'placed' ? 'Pixel placed!' : 'Color updated'),
+      'success'
+    );
   } catch (err) {
     toast('Network error', 'error');
   }
