@@ -54,6 +54,21 @@ db.exec(`
     created_at INTEGER NOT NULL,
     last_activity INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS session_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT NOT NULL,
+    city TEXT,
+    country TEXT,
+    region TEXT,
+    completed_at INTEGER NOT NULL,
+    session_id TEXT,
+    pixels_count INTEGER NOT NULL,
+    pixels_json TEXT,
+    completion_type TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_session_logs_date ON session_logs(completed_at);
 `);
 
 // Middleware
@@ -90,6 +105,28 @@ function getGeoLocation(ip) {
     country: geo.country || 'Unknown',
     region: geo.region
   };
+}
+
+function logSessionComplete(sessionId, ip, completionType) {
+  const loc = getGeoLocation(ip);
+  const pixels = db.prepare(`
+    SELECT x, y, color FROM pixels WHERE session_id = ? AND ip = ?
+  `).all(sessionId, ip);
+  const pixelsJson = JSON.stringify(pixels);
+  db.prepare(`
+    INSERT INTO session_logs (ip, city, country, region, completed_at, session_id, pixels_count, pixels_json, completion_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    ip,
+    loc.city,
+    loc.country,
+    loc.region,
+    Date.now(),
+    sessionId,
+    pixels.length,
+    pixelsJson,
+    completionType
+  );
 }
 
 function logVisitor(ip, sessionId) {
@@ -131,6 +168,38 @@ app.use((req, res, next) => {
   }
   req.session.lastActivity = Date.now();
   next();
+});
+
+// Admin auth - requires ADMIN_SECRET env var
+function requireAdmin(req, res, next) {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Admin not configured' });
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== secret) return res.status(403).json({ error: 'Admin access required' });
+  next();
+}
+
+// API: Session completion log (admin only)
+app.get('/api/session-logs', requireAdmin, (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const startOfDay = new Date(date + 'T00:00:00Z').getTime();
+  const endOfDay = new Date(date + 'T23:59:59.999Z').getTime();
+  const logs = db.prepare(`
+    SELECT ip, city, country, region, completed_at, pixels_count, pixels_json, completion_type
+    FROM session_logs
+    WHERE completed_at >= ? AND completed_at <= ?
+    ORDER BY completed_at DESC
+  `).all(startOfDay, endOfDay);
+  res.json(logs.map(l => ({
+    ip: l.ip,
+    city: l.city,
+    country: l.country,
+    region: l.region,
+    time: l.completed_at,
+    pixelsCount: l.pixels_count,
+    pixels: l.pixels_json ? JSON.parse(l.pixels_json) : [],
+    type: l.completion_type
+  })));
 });
 
 // API: Recent visitors with geo
@@ -300,6 +369,7 @@ app.post('/api/pixel', (req, res) => {
     const sessionComplete = mySessionPixels.length + 1 >= MAX_PIXELS_PER_DAY;
     if (sessionComplete) {
       db.prepare(`UPDATE pixels SET locked = 1 WHERE session_id = ? AND ip = ?`).run(sessionId, ip);
+      logSessionComplete(sessionId, ip, 'completed');
     }
     return res.json({ success: true, action: 'placed', sessionLocked: sessionComplete });
   }
@@ -315,6 +385,8 @@ app.post('/api/lock', (req, res) => {
   db.prepare(`
     UPDATE pixels SET locked = 1 WHERE session_id = ? AND ip = ?
   `).run(sessionId, ip);
+
+  logSessionComplete(sessionId, ip, 'ended');
 
   req.session.destroy();
   res.json({ success: true });
@@ -362,18 +434,27 @@ app.use('/api', (req, res, next) => {
 setInterval(() => {
   const cutoff = Date.now() - SESSION_DURATION_MS;
   const staleSessions = db.prepare(`
-    SELECT session_id FROM sessions
+    SELECT session_id, ip FROM sessions
     WHERE last_activity < ? AND ip NOT IN ('::1', '127.0.0.1')
     AND ip NOT LIKE '::ffff:127.%'
   `).all(cutoff);
   for (const row of staleSessions) {
-    db.prepare(`UPDATE pixels SET locked = 1 WHERE locked = 0 AND session_id = ?`).run(row.session_id);
+    const hadPixels = db.prepare(`SELECT 1 FROM pixels WHERE session_id = ? AND locked = 0 LIMIT 1`).get(row.session_id);
+    if (hadPixels) {
+      db.prepare(`UPDATE pixels SET locked = 1 WHERE locked = 0 AND session_id = ?`).run(row.session_id);
+      logSessionComplete(row.session_id, row.ip, 'timeout');
+    }
   }
 }, 60 * 1000);
 
 // Serve main page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Admin page
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 app.listen(PORT, () => {

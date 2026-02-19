@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Session Log</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="admin-page">
+    <header class="admin-header">
+      <h1>Session Log</h1>
+      <a href="/" class="admin-back">← Back to canvas</a>
+    </header>
+
+    <div id="admin-login" class="admin-login">
+      <label>Admin token</label>
+      <input type="password" id="admin-token" placeholder="Enter admin token">
+      <button type="button" id="admin-login-btn">View log</button>
+    </div>
+
+    <div id="admin-content" class="admin-content" style="display: none;">
+      <div class="admin-toolbar">
+        <input type="date" id="session-log-date" class="session-log-date">
+      </div>
+      <div id="session-log-list" class="session-log-list admin-log-list"></div>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@ A collaborative pixel grid inspired by the Million Dollar Home Page. Draw up to 
 
 ## How It Works
 
-- **500×500 pixel grid** — A shared canvas for everyone
+- **200×200 pixel grid** — A shared canvas for everyone
 - **10 pixels per day** — Each IP can place up to 10 new pixels per day
 - **Connecting pixels** — New pixels must be adjacent (including diagonally) to your existing pixels
 - **Color picker** — Choose any color for your pixels
@@ -18,6 +18,10 @@ npm start
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
+
+## Admin
+
+The session log (IP, geo, time, pixels) is admin-only. Set `ADMIN_SECRET` in your environment, then visit `/admin` and enter the token. Or use `/admin?admin_token=YOUR_SECRET` in the URL.
 
 ## Tech Stack
 
